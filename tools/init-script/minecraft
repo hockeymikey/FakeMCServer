@@ -1,0 +1,614 @@
+#!/bin/sh
+# set -u
+
+
+
+SERVER_NAME='bukkit'
+FAKE_NAME='fakemc'
+
+# run server as this user
+USER='minecraft'
+
+# path to minecraft server
+MC_DIR="/home/$USER/bukkit"
+FAKE_DIR="${MC_DIR}/fake"
+
+# find the latest version by filename filter (* wildcard allowed)
+MC_JAR='craft*.jar'
+FAKE_JAR='FakeMCServer*.jar'
+
+OPTIONS='nogui'
+
+
+
+CPU_COUNT=0
+
+START_MEM="1024M"
+MAX_MEM="1536M"
+
+
+
+# experimental performance tweaks
+PERF_TWEAKS=true
+
+# Enable incremental garbage collection
+ENABLE_INC_GC=true
+
+# Enable automatic adjustment of the incremental garbage collector
+ENABLE_AUTO_INC=true
+
+# Enable concurrent low pause collector
+ENABLE_CONC_SWEEP=true
+
+# print garbage collector details
+ENABLE_GC_DEBUG=false
+
+
+
+# ==============================================================================
+
+
+
+SERVER_NAME=${SERVER_NAME/ /_}
+
+
+
+# cpu count
+CPU_AVAILABLE=( $(grep -c ^processor /proc/cpuinfo) )
+if [ -z $CPU_COUNT ] || [ $CPU_COUNT -lt 1 ] || [ $CPU_COUNT -gt $CPU_AVAILABLE ]; then
+	CPU_COUNT=$CPU_AVAILABLE
+fi
+
+
+
+# find latest jar version
+if [[ $MC_JAR == *\** ]]; then
+	MC_JAR=( $(find ${MC_DIR} -name "${MC_JAR}" | sort -t - -k 2,2) )
+	if [ ${#MC_JAR[@]} -eq 0 ]; then
+		echoerr 'jar not found'
+		exit 1
+	fi
+	# last element in array
+	MC_JAR=${MC_JAR[${#MC_JAR[@]} - 1]}
+fi
+# find latest fake jar
+if [[ $FAKE_JAR == *\** ]]; then
+	FAKE_JAR=( $(find $FAKE_DIR -name "${FAKE_JAR}" | sort -t - -k 2,2) )
+	if [ ${#FAKE_JAR[@]} -eq 0 ]; then
+		echoerr 'fake jar not found'
+		exit 1
+	fi
+	# last element in array
+	FAKE_JAR=${FAKE_JAR[${#FAKE_JAR[@]} - 1]}
+fi
+
+
+
+function newline() {
+        echo -ne "\n"
+}
+function echoline() {
+	echo " * $@"
+}
+function echosleep() {
+	echo -n " * $@."
+	sleep 0.5;echo -n ' .'
+	sleep 0.5;echo -n ' .'
+	sleep 0.5;echo ' .'
+}
+function echoerr() {
+#	logger -st "($SERVER_NAME) $@"
+	echo "($SERVER_NAME) $@" 1>&2
+}
+function ask() {
+	echo -n "$@" '[Y/n] '; read -n 1 reply
+	echo
+	case "$reply" in
+		n*|N*) return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
+
+
+# run as USER
+function run_as_user() {
+	if whoami | grep "$USER" > /dev/null ; then
+		sh -c "$1"
+	else
+		su - $USER -c "$1"
+	fi
+}
+
+
+
+# find existing screen session
+PID=0
+function is_running() {
+	# returns true if session exists
+	COUNT=( $( screen -list | head -n -2 | tail -n +2 | awk "/\.$SERVER_NAME\t/ {print strtonum(\$1)}" | wc -l ) )
+	if [ $COUNT -gt 0 ]; then
+		PID=( $( screen -list | head -n -2 | tail -n +2 | awk "/\.$SERVER_NAME\t/ {print strtonum(\$1)}" ) )
+		return 0
+	fi
+	PID=0
+	return 1
+}
+
+
+
+# find existing fake server
+FAKE_PID=0
+function is_fake_running() {
+	# returns true if session exists
+	COUNT=( $( screen -list | head -n -2 | tail -n +2 | awk "/\.$FAKE_NAME\t/ {print strtonum(\$1)}" | wc -l ) )
+	if [ $COUNT -gt 0 ]; then
+		FAKE_PID=( $( screen -list | head -n -2 | tail -n +2 | awk "/\.$FAKE_NAME\t/ {print strtonum(\$1)}" ) )
+		return 0
+	fi
+	FAKE_PID=0
+	return 1
+}
+
+
+
+function screen_list() {
+	COUNT=( $( screen -list | head -n -2 | tail -n +2 | awk "/\.$SERVER_NAME\t/ {print strtonum(\$1)}" | wc -l ) )
+	if [ $COUNT -gt 0 ]; then
+		ECHO=( $( screen -list | head -n -2 | tail -n +2 | awk "/\.$SERVER_NAME\t/ {print strtonum(\$1)}" ) )
+		echo $ECHO
+	else
+		echo No $SERVER_NAME sessions
+	fi
+	COUNT=( $( screen -list | head -n -2 | tail -n +2 | awk "/\.$FAKE_NAME\t/ {print strtonum(\$1)}" | wc -l ) )
+	if [ $COUNT -gt 0 ]; then
+		ECHO=( $( screen -list | head -n -2 | tail -n +2 | awk "/\.$FAKE_NAME\t/ {print strtonum(\$1)}" ) )
+		echo $ECHO
+	else
+		echo No $FAKE_NAME sessions
+	fi
+}
+
+
+
+function fix_perms() {
+	if whoami | grep "root" > /dev/null ; then
+		DIR=${MC_DIR%/}
+		SIZE=${#DIR}
+		if [ $SIZE -lt 4 ] || [ "$DIR" = "/home" ]; then
+			echoerr "Invalid path? $DIR"
+			exit 1
+		fi
+		COMMAND="chown -Rc $USER:$USER ${MC_DIR%/}"
+		echoline $COMMAND
+		FIXED=`$COMMAND|wc -l`
+
+		if [ $? -ne 0 ]; then
+			echoerr "Error setting permissions. Please check $DIR"
+			exit 1
+		fi
+		if [ $FIXED -gt 0 ]; then
+			echoline "Fixed $FIXED file ownerships"
+		fi
+	fi
+}
+
+
+
+EXEC=''
+function set_exec() {
+	EXEC="java -Xms$START_MEM -Xmx$MAX_MEM"
+	# cpu count
+	if [ -z $CPU_COUNT ] || [ $CPU_COUNT -lt 1 ]; then
+		EXEC="$EXEC -XX:ParallelGCThreads=$CPU_COUNT"
+	fi
+	# disable System.gc()
+	EXEC="$EXEC -XX:+DisableExplicitGC"
+	# performance tweaks suggested by java engineers
+	if [ "$PERF_TWEAKS" = true ]; then
+		EXEC="$EXEC -XX:+AggressiveOpts"
+	fi
+	# incremental sweep gc
+	if [ "$ENABLE_INC_GC" = true ]; then
+		EXEC="$EXEC -Xincgc"
+	fi
+	# concurrent incremental sweep gc
+	if [ "$ENABLE_CONC_SWEEP" = true ]; then
+		EXEC="$EXEC -XX:+UseConcMarkSweepGC"
+	fi
+	# automatic gc adjustment
+	if [ "$ENABLE_AUTO_INC" = true ]; then
+		EXEC="$EXEC -XX:+CMSIncrementalPacing"
+		EXEC="$EXEC -XX:CMSIncrementalDutyCycleMin=0"
+		EXEC="$EXEC -XX:CMSIncrementalDutyCycle=20"
+	fi
+	# debug gc
+	if [ "$ENABLE_GC_DEBUG" = true ]; then
+		EXEC="$EXEC -XX:+PrintGCDetails -XX:+PrintGCTimeStamps -XX:-TraceClassUnloading"
+	fi
+	# jar file
+	EXEC="$EXEC -jar ${MC_JAR##*/}"
+	# custom options
+	if [ ! -z $OPTIONS ]; then
+		EXEC="$EXEC $OPTIONS"
+	fi
+}
+
+
+
+FAKE_EXEC=''
+function set_fake_exec() {
+	FAKE_EXEC="java -Xms5M -Xmx10M -jar ${FAKE_JAR##*/}"
+}
+
+
+
+function run_screen_command() {
+	NAME=${1}
+	COMMAND=${2}
+	if ! is_running; then
+		echoerr "Server is not running, cannot run command: $COMMAND"
+		return 1
+	fi
+	echoline "($NAME) Running command: $COMMAND"
+	run_as_user "screen -S $NAME -X eval 'stuff \"$COMMAND\"\015'"
+	return 0
+}
+
+
+
+function mc_start() {
+	if is_running ; then
+		return 1
+	fi
+	# stop fake server
+	fake_stop
+	# prepare server
+	fix_perms
+	echoline "CPU count: $CPU_COUNT"
+	echoline "Using jar: $MC_JAR"
+	set_exec
+	cd $MC_DIR
+	echosleep "($SERVER_NAME) Starting server"
+	echoline $EXEC
+	# run in screen
+	run_as_user "cd $MC_DIR && screen -dmS $SERVER_NAME $EXEC"
+	# wait for server to start
+	seconds=0
+	until is_running; do
+		echo -n '.'
+		sleep 1
+		seconds=$seconds+1
+		# abort if startup takes longer than 30 seconds
+		if [ $seconds -ge 30 ]; then
+			newline
+			newline
+			echoerr 'Server took more than 30 seconds to start.. aborting.'
+			newline
+			screen -list
+			newline
+			exit 1
+		fi
+	done
+	echoline "($SERVER_NAME) is now running. (pid: $PID)"
+	newline
+	screen -list
+	newline
+	return 0
+}
+
+
+
+function mc_stop_safe() {
+	if ! is_running ; then
+		fake_start
+		return 1
+	fi
+	if [ $# -eq 0 ]; then
+		ACTION='stopping'
+	else
+		ACTION=${1}
+	fi
+	run_screen_command $SERVER_NAME "say Server is $ACTION in 15 seconds..."
+	sleep 5
+	run_screen_command $SERVER_NAME "say Server is $ACTION in 10 seconds..."
+	sleep 5
+	run_screen_command $SERVER_NAME "say Server is $ACTION in 5 seconds..."
+	sleep 3
+	run_screen_command $SERVER_NAME "say Server is $ACTION in 2 seconds.."
+	sleep 2
+	run_screen_command $SERVER_NAME "say Server is $ACTION!"
+	sleep 1
+	mc_stop_now
+}
+function mc_stop_now() {
+	if ! is_running ; then
+		fake_start
+		return 1
+	fi
+	newline
+	echoline "($SERVER_NAME) saving worlds.."
+	run_screen_command $SERVER_NAME save-all
+	echosleep "($SERVER_NAME) Server is stopping.. pid: $PID "
+	run_screen_command $SERVER_NAME stop
+	# wait for shutdown
+	echo -n ' * waiting.'
+	seconds=0
+	while is_running;do
+		echo -n ' .'
+		sleep 0.5
+		let seconds++
+		# abort if shutdown takes longer than 5 minutes
+		if [ $seconds -ge 300 ]; then
+			newline
+			newline
+			echoerr "($SERVER_NAME) Server took more than 5 minutes to shutdown.. aborting."
+			newline
+			screen -list
+			newline
+			exit 1
+		fi
+	done
+	sync
+	newline
+	echoline "($SERVER_NAME) Server has stopped."
+	# start fake server
+	fake_start
+	newline
+	screen -list
+	newline
+	return 0
+}
+
+
+
+function fake_start() {
+	if is_fake_running ; then
+		return 1
+	fi
+	echosleep "($FAKE_NAME) Starting fake server"
+	cd $FAKE_DIR
+	set_fake_exec
+	echoline $FAKE_EXEC
+	run_as_user "cd $FAKE_DIR && screen -dmS $FAKE_NAME $FAKE_EXEC"
+	sleep 0.5
+	if ! is_fake_running ; then
+		echoerr "($FAKE_NAME) Fake server failed to start."
+		exit 1
+	fi
+	return 0
+}
+
+
+
+# stop fake server
+function fake_stop() {
+	if is_fake_running ; then
+		echosleep "($FAKE_NAME) Stopping fake server"
+		screen -S $FAKE_PID -X quit
+	fi
+}
+
+
+
+function save_off() {
+	run_screen_command $SERVER_NAME save-off
+	run_screen_command $SERVER_NAME save-all
+	sync
+}
+function save_on() {
+	run_screen_command $SERVER_NAME save-on
+}
+
+
+
+if [ $# -eq 0 ]; then
+	ARG="help"
+else
+	ARG=${1}
+	if [ $# -ge 2 ]; then
+		# start fake server
+		if [ "$ARG" = "start" ]; then
+			if [ "${2}" = "fake" ]; then
+				ARG="startfake"
+			fi
+		fi
+		# stop now
+		if [ "$ARG" = "stop" ] || [ "$ARG" = "shutdown" ]; then
+			if [ "${2}" = "fast" ] || [ "${2}" = "now" ]; then
+				ARG="stopnow"
+			fi
+		fi
+	fi
+fi
+case "$ARG" in
+	start)
+		if ! mc_start ; then
+			echoline "($SERVER_NAME) server cannot start, already running. (pid: $PID)"
+			screen -list
+		fi
+	;;
+	startfake)
+		if is_running ; then
+			echoline "Cannot start fake server. Real server is currently running."
+			exit 1
+		fi
+		if ! fake_start ; then
+			echoline "($FAKE_NAME) Fake server is already active. (pid: $FAKE_PID)"
+		fi
+	;;
+	stopnow)
+		if ! mc_stop_now ; then
+			echoline "($SERVER_NAME) server is not running, cannot stop."
+		fi
+	;;
+	stop|shutdown)
+		if ! mc_stop_safe 'stopping' ; then
+			echoline "($SERVER_NAME) server is not running, cannot stop."
+		fi
+	;;
+	restart)
+		if is_running ; then
+			mc_stop_safe 'restarting'
+			mc_start
+		else
+			mc_start
+		fi
+	;;
+	status|state)
+		# Shows server status
+		if is_running ; then
+			echoline "($SERVER_NAME) Server is running. (pid: $PID)"
+		else
+			echoline "($SERVER_NAME) Server is not running."
+		fi
+		if is_fake_running ; then
+			echoline "($FAKE_NAME) Fake server is active. (pid: $FAKE_PID)"
+		else
+			echoline "($FAKE_NAME) Fake server is not active."
+		fi
+		screen_list
+		exit 0
+	;;
+	kill)
+		# LAST RESORT! If process is somehow locked up, use this command to kill it and associated processes
+		# Run only if initiated by root user
+		if whoami | grep "root" > /dev/null ; then
+			if ask "Are you sure you want to kill $SERVER_NAME? (pid $PID) If things are working properly, please use the stop command instead." ; then
+				kill -9 $PID
+			fi
+		else
+			echoerr "Please run kill as root or with sudo."
+			exit 1
+		fi
+	;;
+	backup)
+echoerr "I'm sorry, this feature isn't ready yet."
+exit 1
+	;;
+	say)
+		if is_running ; then
+			# Executes say command on the server console
+			if [ $# -lt 2 ]; then
+				echoerr "What do you want to say?"
+				exit 1
+			fi
+			shift
+			run_screen_command "say $*"
+		else
+			echoline "($SERVER_NAME) server is not running, cannot run say command."
+		fi
+	;;
+	command)
+		if is_running ; then
+			# Executes a command on the server console
+			if [ $# -lt 2 ]; then
+				echoerr "Must specify server command (try 'help')"
+				exit 1
+			fi
+			shift
+			run_screen_command "$*"
+		else
+			echoline "($SERVER_NAME) server is not running, cannot run command."
+		fi
+	;;
+	recent)
+		echoline 'Recently logged in users:'
+		cat $MC_DIR/server.log | awk '/entity|conn/ {sub(/lost/,"disconnected");print $1,$2,$4,$5}'
+	;;
+	ops)
+		run_as_user "cat $MC_DIR/ops.txt"
+	;;
+	op)
+		if is_running ; then
+			# Grants player operator status
+			if ! is_running ; then
+				echoerr "Server is not running. Cannot add op."
+				exit 1
+			fi
+			if [ $# -lt 2 ]; then
+				echoerr "Missing player argument."
+				exit 1
+			fi
+			run_screen_command $SERVER_NAME "op ${2}"
+			echoline "Granted OP to ${2}"
+		else
+			echoline "($SERVER_NAME) server is not running, cannot run op command."
+		fi
+	;;
+	deop)
+		if is_running ; then
+			# Revokes player operator status
+			if ! is_running ; then
+				echoerr "Server is not running. Cannot remove op."
+				exit 1
+			fi
+			if [ $# -lt 2 ] ; then
+				echoerr "Missing player argument."
+				exit 1
+			fi
+			run_screen_command $SERVER_NAME "deop ${2}"
+			echoline "Operator status revoked: ${2}"
+		else
+			echoline "($SERVER_NAME) server is not running, cannot run deop command."
+		fi
+	;;
+	console)
+		if is_running ; then
+			if ! is_running ; then
+				echoerr "Server is not running. Cannot enter console."
+				exit 1
+			fi
+			# shows server console with screen
+			echo "Press 'Ctrl+A' and then press 'D' to exit the console."
+			echo "Hit any key to continue:"
+			read -n 1
+## modifying permissions is the only way I was able to run screen. Suggestions appreciated.
+#chmod 626 $(tty)
+			run_as_user "screen -x $SERVER_NAME"
+#chmod 620 $(tty)
+		else
+			echoline "($SERVER_NAME) server is not running, cannot attach console."
+		fi
+	;;
+	version)
+echoerr "I'm sorry, this feature isn't ready yet."
+exit 1
+		exit 0
+	;;
+	help|-h|--help)
+		newline
+		echo "Usage: ${0} COMMAND"
+		newline
+		echo "Available commands:"
+		echo -e "\tstart\t\tStarts the server"
+		echo -e "\tstartfake\t\tStarts the fake mc server"
+		echo -e "\tstop\t\tStops the server safely with warning broadcast"
+		echo -e "\tstopnow\t\tStops the server without warning players"
+		echo -e "\trestart\t\tRestarts the server"
+		echo -e "\tstatus\t\tDisplays server status"
+		echo -e "\tkill\t\tKills the server without saving (last resort)"
+		echo -e "\tbackup\t\tCreates a new backup of the server"
+		echo -e "\tsay\t\tPrints the given string to the in-game chat"
+		echo -e "\tcommand\t\tExecutes a command in-game"
+		echo -e "\trecent\t\tDisplays recently connected users"
+		echo -e "\tops\t\tDisplays server ops"
+		echo -e "\top NAME\t\tGrants NAME operator status."
+		echo -e "\tdeop NAME\tRevokes NAME's operator status."
+		echo -e "\tconsole\t\tDisplays the server console screen, exit with Ctrl+A, D"
+		echo -e "\tversion\t\tDisplays minecraft server version and then exits"
+		echo -e "\thelp\t\tDisplays this list of commands"
+		newline
+	;;
+	*)
+		# == MINECRAFT SERVICE COMMANDS ===============================================
+		newline
+		echo -e "Usage: \n${0} \{start|startfake|stop|stopnow|restart|help\}"
+		newline
+		echo 'See help for more commands.'
+		newline
+		exit 0
+	;;
+esac
+exit 0
+
