@@ -83,6 +83,53 @@ ENABLE_GC_DEBUG=false
 
 
 
+#RESET_FORMATS="\e[0m"
+
+COLOR_RESET="\e[39m"
+#COLOR_BLACK="\e[30m"
+COLOR_RED="\e[31m"
+COLOR_GREEN="\e[32m"
+#COLOR_YELLOW="\e[33m"
+#COLOR_BLUE="\e[34m"
+#COLOR_MAGENTA="\e[35m"
+#COLOR_CYAN="\e[36m"
+#COLOR_L_GRAY="\e[37m"
+#COLOR_D_GRAY="\e[90m"
+#COLOR_L_RED="\e[91m"
+#COLOR_L_GREEN="\e[92m"
+#COLOR_L_YELLOW="\e[93m"
+#COLOR_L_BLUE="\e[94m"
+#COLOR_L_MAGENTA="\e[95m"
+#COLOR_L_CYAN="\e[96m"
+#COLOR_WHITE="\e[97m"
+
+#BG_RESET="\e[49m"
+#BG_BLACK="\e[40m"
+#BG_RED="\e[41m"
+#BG_GREEN="\e[42m"
+#BG_YELLOW="\e[43m"
+#BG_BLUE="\e[44m"
+#BG_MAGENTA="\e[45m"
+#BG_CYAN="\e[46m"
+#BG_L_GRAY="\e[47m"
+#BG_D_GRAY="\e[100m"
+#BG_L_RED="\e[101m"
+#BG_L_GREEN="\e[102m"
+#BG_L_YELLOW="\e[103m"
+#BG_L_BLUE="\e[104m"
+#BG_L_MAGENTA="\e[105m"
+#BG_L_CYAN="\e[106m"
+#BG_WHITE="\e[107m"
+
+#FORMAT_BOLD="\e[1m"
+#FORMAT_DIM="\e[2m"
+#FORMAT_UNDERLINE="\e[4m"
+#FORMAT_BLINK="\e[5m"
+#FORMAT_INVERT="\e[7m"
+#FORMAT_HIDDEN="\e[8m"
+
+
+
 set -u
 SERVER_NAME=${SERVER_NAME/ /_}
 
@@ -128,10 +175,10 @@ function newline() {
         echo -ne "\n"
 }
 function echoline() {
-	echo " * $@"
+	echo -e " * $@"
 }
 function echosleep() {
-	echo -n " * $@."
+	echo -ne " * $@."
 	sleep 0.5;echo -n ' .'
 	sleep 0.5;echo -n ' .'
 	sleep 0.5;echo ' .'
@@ -518,16 +565,16 @@ case "$ARG" in
 	status|state)
 		# Shows server status
 		if is_running ; then
-			echoline "($SERVER_NAME) [ONLINE] Server is running. (pid: $PID)"
+			echoline "($SERVER_NAME) ${COLOR_GREEN}[ONLINE]${COLOR_RESET}  Server is running. (pid: $PID)"
 		else
-			echoline "($SERVER_NAME) [offline] Server is not running."
+			echoline "($SERVER_NAME) ${COLOR_RED}[offline]${COLOR_RESET} Server is not running."
 		fi
 		if is_fake_running ; then
-			echoline "($FAKE_NAME) [ONLINE] Fake server is active. (pid: $FAKE_PID)"
+			echoline "($FAKE_NAME) ${COLOR_GREEN}[ONLINE]${COLOR_RESET}  Fake server is active. (pid: $FAKE_PID)"
 		else
-			echoline "($FAKE_NAME) [offline] Fake server is not active."
+			echoline "($FAKE_NAME) ${COLOR_RED}[offline]${COLOR_RESET} Fake server is not active."
 		fi
-		screen_list
+		#screen_list
 		exit 0
 	;;
 	kill)
