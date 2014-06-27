@@ -1,5 +1,31 @@
 #!/bin/sh
-# set -u
+### BEGIN INIT INFO
+# chkconfig: 345 95 10
+# description: init script for minecraft servers
+# Default-Start: 345
+# Default-Stop: 0126
+### END INIT INFO
+
+
+
+#===============================================================================
+# /etc/init.d/minecraft
+#
+# Minecraft init script
+# script created by lorenzop
+#
+# This scripts starts your minecraft server as a service. When the service is
+# stopped, the fake minecraft server will start to take its place. A cron can
+# be used to check once a minute to be sure one of the servers are running, or
+# to start the fake server at system startup.
+#
+# chkconfig --level 345 minecraft on
+#
+# * * * * * service minecraft cron
+#
+# https://github.com/michidk/FakeMCServer
+#
+#===============================================================================
 
 
 
@@ -49,7 +75,27 @@ ENABLE_GC_DEBUG=false
 
 
 
+set -u
 SERVER_NAME=${SERVER_NAME/ /_}
+
+if [ ! -d $MC_DIR ]; then
+	echo "Minecraft server directory not found: $MC_DIR"
+	exit 1
+fi
+
+
+
+# Source function library.
+if [ -f /etc/init.d/functions ] ; then
+	. /etc/init.d/functions
+elif [ -f /etc/rc.d/init.d/functions ] ; then
+	. /etc/rc.d/init.d/functions
+else
+	exit 1
+fi
+
+# Check that networking is up.
+[ ${NETWORKING} = "no" ] && exit 1
 
 
 
