@@ -4,9 +4,17 @@
 # description: init script for minecraft servers
 # Default-Start: 345
 # Default-Stop: 0126
+# Required-Start: $network
 ### END INIT INFO
 
-
+# Source function library.
+if [ -f /etc/init.d/functions ]; then
+	. /etc/init.d/functions
+elif [ -f /etc/rc.d/init.d/functions ]; then
+	. /etc/rc.d/init.d/functions
+else
+	exit 1
+fi
 
 #===============================================================================
 # /etc/init.d/minecraft
@@ -82,20 +90,6 @@ if [ ! -d $MC_DIR ]; then
 	echo "Minecraft server directory not found: $MC_DIR"
 	exit 1
 fi
-
-
-
-# Source function library.
-if [ -f /etc/init.d/functions ] ; then
-	. /etc/init.d/functions
-elif [ -f /etc/rc.d/init.d/functions ] ; then
-	. /etc/rc.d/init.d/functions
-else
-	exit 1
-fi
-
-# Check that networking is up.
-[ ${NETWORKING} = "no" ] && exit 1
 
 
 
