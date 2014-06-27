@@ -111,7 +111,7 @@ fi
 if [[ $MC_JAR == *\** ]]; then
 	MC_JAR=( $(find ${MC_DIR} -name "${MC_JAR}" | sort -t - -k 2,2) )
 	if [ ${#MC_JAR[@]} -eq 0 ]; then
-		echoerr 'jar not found'
+		echo 'jar not found'
 		exit 1
 	fi
 	# last element in array
@@ -121,7 +121,7 @@ fi
 if [[ $FAKE_JAR == *\** ]]; then
 	FAKE_JAR=( $(find $FAKE_DIR -name "${FAKE_JAR}" | sort -t - -k 2,2) )
 	if [ ${#FAKE_JAR[@]} -eq 0 ]; then
-		echoerr 'fake jar not found'
+		echo 'fake jar not found'
 		exit 1
 	fi
 	# last element in array
@@ -483,6 +483,18 @@ case "$ARG" in
 			echoline "($FAKE_NAME) Fake server is already active. (pid: $FAKE_PID)"
 		fi
 	;;
+	cron)
+		if is_running || is_fake_running ; then
+			exit 0
+		fi
+		fake_start
+		sleep 2
+		if ! is_fake_running ; then
+			echoerr 'Failed to start the fake server!'
+			exit 1
+		fi
+		exit 0
+	;;
 	stopnow)
 		if ! mc_stop_now ; then
 			echoline "($SERVER_NAME) server is not running, cannot stop."
@@ -491,6 +503,14 @@ case "$ARG" in
 	stop|shutdown)
 		if ! mc_stop_safe 'stopping' ; then
 			echoline "($SERVER_NAME) server is not running, cannot stop."
+		fi
+	;;
+	kill)
+		if is_running ; then
+			screen -S $PID -X quit
+		fi
+		if is_fake_running ; then
+			screen -S $FAKE_PID -X quit
 		fi
 	;;
 	restart)
@@ -504,14 +524,14 @@ case "$ARG" in
 	status|state)
 		# Shows server status
 		if is_running ; then
-			echoline "($SERVER_NAME) Server is running. (pid: $PID)"
+			echoline "($SERVER_NAME) [ONLINE] Server is running. (pid: $PID)"
 		else
-			echoline "($SERVER_NAME) Server is not running."
+			echoline "($SERVER_NAME) [offline] Server is not running."
 		fi
 		if is_fake_running ; then
-			echoline "($FAKE_NAME) Fake server is active. (pid: $FAKE_PID)"
+			echoline "($FAKE_NAME) [ONLINE] Fake server is active. (pid: $FAKE_PID)"
 		else
-			echoline "($FAKE_NAME) Fake server is not active."
+			echoline "($FAKE_NAME) [offline] Fake server is not active."
 		fi
 		screen_list
 		exit 0
@@ -629,8 +649,10 @@ exit 1
 		echo "Available commands:"
 		echo -e "\tstart\t\tStarts the server"
 		echo -e "\tstartfake\t\tStarts the fake mc server"
+		echo -e "\tcron\t\tStarts the fake server if neither are running"
 		echo -e "\tstop\t\tStops the server safely with warning broadcast"
 		echo -e "\tstopnow\t\tStops the server without warning players"
+		echo -e "\tkill\t\tKills the server processes without saving"
 		echo -e "\trestart\t\tRestarts the server"
 		echo -e "\tstatus\t\tDisplays server status"
 		echo -e "\tkill\t\tKills the server without saving (last resort)"
