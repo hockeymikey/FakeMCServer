@@ -43,7 +43,7 @@ public class ResponderThread extends Thread
     {
         this.thread = Thread.currentThread();
         boolean showMotd = false;
-        int protocol = 5;
+        int protocol = 47;
 
         try
         {
